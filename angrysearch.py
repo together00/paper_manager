@@ -35,7 +35,7 @@ import PyQt5.QtGui as Qg
 import PyQt5.QtWidgets as Qw
 
 # THE DATABASE WAS BUILD USING FTS5 EXTENSION OF SQLITE3
-FTS5_AVAILABLE = False
+FTS5_AVAILABLE = True
 
 # CONFIG AND DATABASE PATHS
 TEMP_PATH = Qc.QStandardPaths.standardLocations(
@@ -49,12 +49,32 @@ DATABASE_PATH = join_path(os.path.expanduser('~'),
                           'angrysearch',
                           'angry_database.db')
 
+# Modify the dataset path
+database_dir = '/home/moon/.cache/angrysearch/'
 
 def run_query(query, parameters=()):
-    """Run any query."""
+    con = sqlite3.connect(database_dir + 'angry_database.db')
     query_result = con.execute(query, parameters)
+    con.close
     return query_result
 
+def run_update(query, parameters=()):
+    con = sqlite3.connect(database_dir + 'angry_database.db')
+    con.execute(query, parameters)
+    con.commit()
+    con.close
+
+def run_update_metadata(query, parameters=()):
+    con = sqlite3.connect(database_dir + 'metadata.db')
+    con.execute(query, parameters)
+    con.commit()
+    con.close
+
+def run_query_metadata(query, parameters=()):
+    con = sqlite3.connect(database_dir + 'metadata.db')
+    query_result = con.execute(query, parameters)
+    con.close
+    return query_result
 
 # THREAD FOR ASYNC SEARCHES IN THE DATABASE
 # RETURNS FIRST 500(number_of_results) RESULTS MATCHING THE QUERY
@@ -62,13 +82,16 @@ def run_query(query, parameters=()):
 class ThreadDBQuery(Qc.QThread):
     db_query_signal = Qc.pyqtSignal(str, list, list)
 
-    def __init__(self, db_query, setting_params, parent=None):
+    def __init__(self, db_query, db_query_attribute, setting_params, parent=None):
         super().__init__()
         self.words_quoted = None
         self.number_of_results = setting_params['number_of_results']
         self.fts = setting_params['fts']
         self.regex_mode = setting_params['regex_mode']
         self.db_query = db_query
+        
+        # MOON, 2024-01-01
+        self.db_query_attribute = db_query_attribute
 
     def run(self):
         """Run user's search query"""
@@ -78,7 +101,8 @@ class ThreadDBQuery(Qc.QThread):
             params = (self.db_query, self.number_of_results)
         elif self.fts:
             sql_query = self.match_query_adjustment(self.db_query)
-            q = "SELECT * FROM angry_table WHERE angry_table MATCH ? LIMIT ?"
+            # MOON, 2024-01-01
+            q = "SELECT * FROM angry_table WHERE {} MATCH ? LIMIT ?".format(self.db_query_attribute)
             params = (sql_query, self.number_of_results)
         else:
             sql_query = self.like_query_adjustment(self.db_query)
@@ -253,12 +277,26 @@ class ThreadDBUpdate(Qc.QThread):
         self.replace_old_db_with_new()
 
         self.db_update_signal.emit('the_end_of_the_update', '0')
+    
+    # To exclude some files that are not paper according to the filename. MOON 2023-12-31
+    def check_paper_name(self, fname):
+        paperfname = fname.decode(encoding='utf-8', errors='ignore')
+        if paperfname.endswith('.pdf') == False:
+            return False
+        if ' ' not in paperfname or '_' in paperfname:
+            return False
+        count_upper = sum(1 for char in paperfname if char.isupper())
+        # I think there is no paper who has only two upper characters, MOON 2024-01-08
+        if count_upper <= 2:
+            return False
+        return paperfname[:-4]
 
     def crawling_drives(self):
         def error(err):
             print(err)
 
-        root_dir = b'/'
+        # MOON, 2024-01-06, the folders used to save papers
+        root_dirs = [b'/media/moon/Data/study/papers/', b'/media/moon/Data/study/swift/', b'/media/moon/Data/study/share/papers/']
         tstart = datetime.now()
 
         dir_list = []
@@ -272,49 +310,68 @@ class ThreadDBUpdate(Qc.QThread):
         except ImportError:
             scandir = os
 
-        for root, dirs, files in scandir.walk(root_dir, onerror=error):
-            dirs.sort()
-            files.sort()
+        for root_dir in root_dirs:
+            for root, dirs, files in scandir.walk(root_dir, onerror=error):
+                dirs.sort()
+                files.sort()
 
-            if root == b'/' and b'proc' in dirs:
-                dirs.remove(b'proc')
-            # SLICING WITH [:] SO THAT THE LIST ID STAYS THE SAME
-            dirs[:] = self.remove_excluded_dirs(dirs, root, self.prep_excluded)
+                if root == b'/' and b'proc' in dirs:
+                    dirs.remove(b'proc')
+                # SLICING WITH [:] SO THAT THE LIST ID STAYS THE SAME
+                dirs[:] = self.remove_excluded_dirs(dirs, root, self.prep_excluded)
 
-            self.crawl_signal.emit(
-                root.decode(encoding='utf-8', errors='ignore'))
+                self.crawl_signal.emit(
+                    root.decode(encoding='utf-8', errors='ignore'))
 
-            if self.lite:
-                for dname in dirs:
-                    dir_list.append(('1', os.path.join(root, dname).decode(
-                        encoding='UTF-8', errors='ignore')))
-                for fname in files:
-                    file_list.append(('0', os.path.join(root, fname).decode(
-                        encoding='UTF-8', errors='ignore')))
-            else:
-                for dname in dirs:
-                    path = os.path.join(root, dname)
-                    utf_path = path.decode(encoding='utf-8', errors='ignore')
-                    try:
-                        stats = os.lstat(path)
-                        epoch_time = int(stats.st_mtime.__trunc__())
-                    except:
-                        print("Can't access: " + str(path))
-                        epoch_time = 0
-                    dir_list.append(('1', utf_path, '', epoch_time))
-                for fname in files:
-                    path = os.path.join(root, fname)
-                    utf_path = path.decode(encoding='utf-8', errors='ignore')
-                    try:
-                        stats = os.lstat(path)
-                        size = stats.st_size
-                        epoch_time = int(stats.st_mtime.__trunc__())
-                    except:
-                        print("Can't access: " + str(path))
-                        size = 0
-                        epoch_time = 0
-                    file_list.append(('0', utf_path, size, epoch_time))
-
+                if self.lite:
+                    for dname in dirs:
+                        dir_list.append(('1', os.path.join(root, dname).decode(
+                            encoding='UTF-8', errors='ignore')))
+                    for fname in files:
+                        file_list.append(('0', os.path.join(root, fname).decode(
+                            encoding='UTF-8', errors='ignore')))
+                else:
+                    # MOON, 2023-12-31
+                    # I don't need the folder, pdf is enough
+                    # for dname in dirs:
+                    #     path = os.path.join(root, dname)
+                    #     utf_path = path.decode(encoding='utf-8', errors='ignore')
+                    #     try:
+                    #         stats = os.lstat(path)
+                    #         epoch_time = int(stats.st_mtime.__trunc__())
+                    #     except:
+                    #         print("Can't access: " + str(path))
+                    #         epoch_time = 0
+                    #     dir_list.append(('1', utf_path, '', '', '', epoch_time))
+                    # End
+                    for fname in files:
+                        papername = self.check_paper_name(fname)
+                        if papername == False:
+                            continue
+                        
+                        path = os.path.join(root, fname)
+                        utf_path = path.decode(encoding='utf-8', errors='ignore')
+                        try:
+                            stats = os.lstat(path)
+                            size = stats.st_size
+                            epoch_time = int(stats.st_mtime.__trunc__())
+                        except:
+                            print("Can't access: " + str(path))
+                            size = 0
+                            epoch_time = 0
+                        # Get the metadata from Table metadata
+                        # Use the lower case of the original filename/papername
+                        q = "SELECT level, venue, year, tags, reflections FROM metadata where name = ?;"
+                        query_metadata = run_query_metadata(q, (papername.lower(), ))
+                        query_metadata = query_metadata.fetchone()
+                        if query_metadata == None:
+                            file_list.append(('0', utf_path, '', '', '', '', '', size, epoch_time))
+                        else:
+                            query_metadata = list(query_metadata)
+                            for t in range(len(query_metadata)):
+                                if query_metadata[t] == None:
+                                    query_metadata[t] = ''
+                            file_list.append(('0', utf_path, query_metadata[0], query_metadata[1], query_metadata[2], query_metadata[3], query_metadata[4], size, epoch_time))
         self.table = dir_list + file_list
         self.crawl_time = self.time_difference(tstart)
 
@@ -347,10 +404,18 @@ class ThreadDBUpdate(Qc.QThread):
 
         else:
             if self.fts5_pragma_check():
+                # MOON, 2023-12-31
+                # is_dir, path, proficiency, venue, tags, reflection, size, date
                 cur.execute('''CREATE VIRTUAL TABLE angry_table
                                 USING fts5(directory UNINDEXED,
                                            path,
-                                           size UNINDEXED, date UNINDEXED)''')
+                                           level,
+                                           venue,
+                                           year,
+                                           tags,
+                                           reflections,
+                                           size UNINDEXED, 
+                                           date UNINDEXED)''')
                 cur.execute('''PRAGMA user_version = 4;''')
             else:
                 cur.execute('''CREATE VIRTUAL TABLE angry_table
@@ -360,7 +425,7 @@ class ThreadDBUpdate(Qc.QThread):
                                            notindexed=date)''')
                 cur.execute('''PRAGMA user_version = 3;''')
 
-            cur.executemany('''INSERT INTO angry_table VALUES (?, ?, ?, ?)''',
+            cur.executemany('''INSERT INTO angry_table VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                             self.table)
 
         con.commit()
@@ -459,84 +524,15 @@ class ThreadMimetype(Qc.QThread):
 
         self.mime_signal.emit(self.path, mimetype)
 
+class AngryTableModel(Qg.QStandardItemModel):
+    r'''
+    MOON, 2024-01-08
+    Replace `Qc.QAbstractTableModel` with `Qg.QStandardItemModel`, and remove the original methods `data()` and `sort()`.
+    This helps me to use ToolTip (I don't know why the original code in ANGRYsearch can not work well with ToolTip).
 
-# CUSTOM TABLE MODEL TO HAVE FINE CONTROL OVER THE CONTENT AND PRESENTATION
-class AngryTableModel(Qc.QAbstractTableModel):
-    sort_changed_signal = Qc.pyqtSignal(int, int)
-
-    def __init__(self, table_data=None, setting_params=None, parent=None):
-        super().__init__()
-        if table_data is None:
-            table_data = [[]]
-
-        self.table_data = table_data
-
-        if setting_params['angrysearch_lite']:
-            self.headers = ['Name', 'Path']
-        else:
-            self.headers = ['Name', 'Path', 'Size', 'Date Modified']
-
-    def rowCount(self, parent=None, *args, **kwargs):
-        return len(self.table_data)
-
-    def columnCount(self, parent=None, *args, **kwargs):
-        return len(self.headers)
-
-    def headerData(self, section, orientation, role=None):
-        if role == Qc.Qt.DisplayRole and orientation == Qc.Qt.Horizontal:
-            return self.headers[section]
-
-    def data(self, index, role=None):
-        if role == Qc.Qt.DisplayRole:
-            row = index.row()
-            column = index.column()
-            value = self.table_data[row][column]
-            if column == 3:
-                return value
-
-            return value.text()
-
-        if role == Qc.Qt.DecorationRole and index.column() == 0:
-            row = index.row()
-            column = index.column()
-            value = self.table_data[row][column]
-            return value.icon()
-
-    def sort(self, column, order=None):
-        self.sort_changed_signal.emit(column, order)
-
-        if column == 0:
-            self.layoutAboutToBeChanged.emit()
-            self.table_data.sort(key=lambda z: z[0]._name)
-            if order == Qc.Qt.DescendingOrder:
-                self.table_data.reverse()
-            self.table_data.sort(key=lambda z: z[0]._is_dir, reverse=True)
-            self.layoutChanged.emit()
-
-        elif column == 1:
-            self.layoutAboutToBeChanged.emit()
-            self.table_data.sort(key=lambda z: z[0]._parent_dir)
-            self.table_data.sort(key=lambda z: z[0]._is_dir, reverse=True)
-            self.layoutChanged.emit()
-
-        elif column == 2:
-            self.layoutAboutToBeChanged.emit()
-            self.table_data.sort(key=lambda z: z[2]._bytes)
-            if order == Qc.Qt.DescendingOrder:
-                self.table_data.reverse()
-            self.table_data.sort(key=lambda z: z[0]._is_dir, reverse=True)
-            self.layoutChanged.emit()
-
-        elif column == 3:
-            self.layoutAboutToBeChanged.emit()
-            self.table_data.sort(key=lambda z: z[3])
-            if order == Qc.Qt.DescendingOrder:
-                self.table_data.reverse()
-            self.table_data.sort(key=lambda z: z[0]._is_dir, reverse=True)
-            self.layoutChanged.emit()
-
-    def itemFromIndex(self, row, col):
-        return self.table_data[row][col]
+    https://doc.qt.io/qtforpython-5/PySide2/QtGui/QStandardItemModel.html
+    '''
+    pass
 
 
 # CUSTOM TABLE VIEW TO EASILY ADJUST ROW HEIGHT AND COLUMN WIDTH
@@ -553,10 +549,10 @@ class AngryTableView(Qw.QTableView):
             self.setColumnWidth(0, int(width * 0.40))
             self.setColumnWidth(1, int(width * 0.60))
         else:
-            self.setColumnWidth(0, int(width * 0.30))
-            self.setColumnWidth(1, int(width * 0.38))
-            self.setColumnWidth(2, int(width * 0.10))
-            self.setColumnWidth(3, int(width * 0.22))
+            # MOON, You can modify the column width
+            width_col = [0.38, 0.03, 0.04, 0.03, 0.2, 0.2, 0.05, 0.07]
+            for i in range(7):
+                self.setColumnWidth(i, int(width * width_col[i]))
 
     # ROW IS HIGHLIGHTED THE MOMENT THE TABLE IS FOCUSED
     def focusInEvent(self, event):
@@ -598,10 +594,21 @@ class AngryTableView(Qw.QTableView):
         act_open_path = right_click_menu.addAction('Open Path')
         act_open_path.triggered.connect(self.parent().parent().right_clk_path)
 
+        act_open_path = right_click_menu.addAction('Copy Path')
+        act_open_path.triggered.connect(self.parent().parent().right_clk_copy_path)
+
         right_click_menu.addSeparator()
 
-        act_copy_path = right_click_menu.addAction('Copy Path')
-        act_copy_path.triggered.connect(self.parent().parent().right_clk_copy)
+        # MOON, 2023-12-31
+        # I don't know why the currentIndex().column() inside right_clk_modify() always returns 0
+        # Thus, I use row and col to save the value of row and col, then use lambda to transfer the argument
+        row = self.currentIndex().row()
+        col = self.currentIndex().column()
+        act_copy = right_click_menu.addAction('Copy')
+        act_copy.triggered.connect(lambda: self.parent().parent().right_clk_copy(row, col))
+
+        act_modify = right_click_menu.addAction('Modify')
+        act_modify.triggered.connect(lambda: self.parent().parent().right_clk_modify(row, col))
 
         right_click_menu.exec_(event.globalPos())
 
@@ -612,18 +619,28 @@ class CenterWidget(Qw.QWidget):
         super().__init__()
         self.setting_params = setting_params
         self.search_input = Qw.QLineEdit()
+        
+        # MOON, 2023-12-31
+        self.combobox = Qw.QComboBox()
+        self.combobox.addItem("    Path     ")
+        self.combobox.addItem("    Venue    ")
+        self.combobox.addItem("    Year     ")
+        self.combobox.addItem("    Tags     ")
+
         self.table = AngryTableView(self.setting_params['angrysearch_lite'],
                                     self.setting_params['row_height'])
-        self.upd_button = Qw.QPushButton('update')
+        self.upd_button = Qw.QPushButton('    Update    ')
         self.fts_checkbox = Qw.QCheckBox()
 
         grid = Qw.QGridLayout()
         grid.setSpacing(10)
-
-        grid.addWidget(self.search_input, 1, 1)
-        grid.addWidget(self.fts_checkbox, 1, 3)
-        grid.addWidget(self.upd_button, 1, 4)
-        grid.addWidget(self.table, 2, 1, 4, 4)
+        
+        grid.addWidget(self.search_input, 0, 0)
+        grid.addWidget(self.fts_checkbox, 0, 1)
+        grid.addWidget(self.upd_button, 0, 2)
+        grid.addWidget(self.combobox, 0, 3)
+        
+        grid.addWidget(self.table, 1, 0, 1, 4)
         self.setLayout(grid)
 
         self.setTabOrder(self.search_input, self.table)
@@ -638,7 +655,7 @@ class AngryMainWindow(Qw.QMainWindow):
         super().__init__()
         self.settings = Qc.QSettings(CONFIG_PATH, Qc.QSettings.IniFormat)
         self.setting_params = {
-            'angrysearch_lite': True,
+            'angrysearch_lite': False,
             'fts': True,
             'typing_delay': False,
             'darktheme': False,
@@ -714,10 +731,15 @@ class AngryMainWindow(Qw.QMainWindow):
             self.center.search_input.setStyleSheet('')
 
     def read_settings(self):
+        # MOON, 2024-01-01
+        # It saves the last run geometry, so `resize` below has no effect
         if self.settings.value('Last_Run/geometry'):
             self.restoreGeometry(self.settings.value('Last_Run/geometry'))
         else:
-            self.resize(720, 540)
+            # MOON, 2023-12-30
+            self.resize(2100, 800)
+            # End
+
             qr = self.frameGeometry()
             cp = Qw.QDesktopWidget().availableGeometry().center()
             qr.moveCenter(cp)
@@ -837,7 +859,7 @@ class AngryMainWindow(Qw.QMainWindow):
 
         # TRAY ICON NEEDS TO BE HIDDEN
         # SO THAT THE MAIN WINDOW INSTANCE AUTOMATICALLY DELETES IT ON CLOSING
-        self.tray_icon.hide()
+        #self.tray_icon.hide()
         event.accept()
 
     def init_gui(self):
@@ -909,13 +931,15 @@ class AngryMainWindow(Qw.QMainWindow):
 
         self.show()
         self.show_first_500()
-        self.make_sys_tray()
+        #self.make_sys_tray()
 
         self.center.search_input.setFocus()
         self.center.search_input.returnPressed.connect(self.focusNextChild)
 
         self.regex_mode_color_indicator()
 
+    # MOON, 2024-01-02, I donot need the icon appearing in the top of the screen
+    # so I comment this function.
     def make_sys_tray(self):
         if Qw.QSystemTrayIcon.isSystemTrayAvailable():
             menu = Qw.QMenu()
@@ -1003,9 +1027,12 @@ class AngryMainWindow(Qw.QMainWindow):
                 self.queries_threads[-1]['thread'].start()
                 self.regex_query_ready = False
         else:
+            # MOON, 2024-01-08, search by the current text
+            attribute = self.center.combobox.currentText()        
+            attribute = attribute.replace(" ", "").lower()
             self.queries_threads.append(
                 {'input': input_text,
-                 'thread': ThreadDBQuery(input_text, self.setting_params)})
+                 'thread': ThreadDBQuery(input_text, attribute, self.setting_params)})
 
             self.queries_threads[-1]['thread'].db_query_signal.connect(
                 self.database_query_done, Qc.Qt.QueuedConnection)
@@ -1022,40 +1049,15 @@ class AngryMainWindow(Qw.QMainWindow):
                 self.new_query_new_thread(self.queries_threads[-1]['input'])
 
         if db_query == self.queries_threads[-1]['input']:
+            # MOON, 2023-12-31
             self.process_q_resuls(db_query, db_query_result, words_quoted)
 
     # FORMAT DATA FOR THE MODEL
+    # Prosess the query results
     def process_q_resuls(self, db_query, db_query_result, words_quoted=None):
         if words_quoted is None:
             words_quoted = []
         model_data = []
-
-        column_to_sort_by, revert_sort_order = self.setting_params['last_sort']
-
-        # BY NAME
-        if column_to_sort_by is 0:
-            db_query_result.sort(key=lambda x: ((x[1].split('/'))[-1].lower()))
-            if revert_sort_order is 1:
-                db_query_result.reverse()
-            db_query_result.sort(key=itemgetter(0), reverse=True)
-
-        # BY DATE
-        if column_to_sort_by is 3:
-            db_query_result.sort(key=itemgetter(3))
-            if revert_sort_order is 1:
-                db_query_result.reverse()
-            db_query_result.sort(key=itemgetter(0), reverse=True)
-
-        # BY SIZE, SPECIAL CASE BECAUSE OF EMPTY STRINGS FOR DIRECTORIES
-        # DIRECTORIES ARE SORTED AS IF VALUE 0, OR MAX INT SIZE IN REVERSE
-        if column_to_sort_by is 2:
-            if revert_sort_order is 0:
-                db_query_result.sort(
-                    key=lambda x: x[2] if isinstance(x[2], int) else 0)
-            else:
-                db_query_result.sort(
-                    key=lambda x: x[2] if isinstance(x[2], int) else sys.maxsize,
-                    reverse=True)
 
         if self.setting_params['regex_mode']:
             rx = '({})'.format(db_query)
@@ -1079,24 +1081,33 @@ class AngryMainWindow(Qw.QMainWindow):
         self.regex_queries = re.compile(rx, re.IGNORECASE)
 
         for tup in db_query_result:
-            split_by_slash = tup[1].split('/')
+            keys = ['is_dir', 'path', 'level', 'venue', 'year', 'tags', 'reflections', 'size', 'date']
+            item = {}
+            for i in range(len(tup)):
+                item[keys[i]] = tup[i]
+
+            split_by_slash = item['path'].split('/')
 
             name = _name = split_by_slash[-1]
             path = _path = '/'.join(split_by_slash[:-1]) or '/'
+            tags = item['tags']
 
             if db_query != '':
                 name = self.bold_text(name)
                 path = self.bold_text(path)
+                tags = self.bold_text(tags)
 
             # NAME ITEM IN THE FIRST COLUMN
-            n = Qg.QStandardItem(name)
-            n._name = _name.lower()
-            n._parent_dir = _path
-            n._fullpath = tup[1]
-            n._is_dir = tup[0]
+            # MOON, 2023-01-01, I remveo the `.pdf`
+            name = Qg.QStandardItem(name[:-4])
+            name._name = _name.lower()
+            name._exact_name = _name
+            name._parent_dir = _path
+            name._fullpath = item['path']
+            name._is_dir = item['is_dir']
 
-            if tup[0] == '1':
-                n.setIcon(self.icon_dictionary['folder'])
+            if item['is_dir'] == '1':
+                name.setIcon(self.icon_dictionary['folder'])
             else:
                 short_mime = mimetypes.guess_type(_name)[0]
                 if short_mime:
@@ -1106,50 +1117,68 @@ class AngryMainWindow(Qw.QMainWindow):
                                 'x-7z-compressed']
                     short_mime = short_mime.split('/')
                     if short_mime[0] in self.icon_dictionary:
-                        n.setIcon(self.icon_dictionary[short_mime[0]])
+                        name.setIcon(self.icon_dictionary[short_mime[0]])
                     elif short_mime[1] in self.icon_dictionary:
-                        n.setIcon(self.icon_dictionary[short_mime[1]])
+                        name.setIcon(self.icon_dictionary[short_mime[1]])
                     elif short_mime[1] in archives:
-                        n.setIcon(self.icon_dictionary['archive'])
+                        name.setIcon(self.icon_dictionary['archive'])
                     else:
-                        n.setIcon(self.icon_dictionary['file'])
+                        name.setIcon(self.icon_dictionary['file'])
                 else:
-                    n.setIcon(self.icon_dictionary['file'])
+                    name.setIcon(self.icon_dictionary['file'])
 
-            # PATH ITEM IN THE SECOND COLUMN
-            m = Qg.QStandardItem(path)
-            m._parent_dir = _path
-            m._fullpath = tup[1]
-            m._name = n._name
-            m._is_dir = tup[0]
+            # MOON, 2023-12-30
+            level = Qg.QStandardItem(item['level'])
 
-            if self.setting_params['angrysearch_lite']:
-                item = [n, m]
-            else:
-                # FILE SIZE ITEM IN THE THIRD COLUMN
-                file_size = ''
-                bytesize = 0
-                if tup[2] != '':
-                    bytesize = int(tup[2])
-                    file_size = self.readable_filesize(bytesize)
-                o = Qg.QStandardItem(file_size)
-                o._bytes = bytesize
+            #venue = Qg.QStandardItem('<kbd style="background-color: lightgrey">{}</kbd>'.format(item['venue']))
+            venue = Qg.QStandardItem(item['venue'])
+            year = Qg.QStandardItem(item['year'])
 
-                # DATE IN THE FOURTH COLUMN
-                p = datetime.fromtimestamp(tup[3])
+            tags = Qg.QStandardItem(tags)
+            tags._tags = item['tags']
+            #tags.setBackground(Qg.QColor('#348ceb'))
+            tags.setToolTip(tags._tags)
 
-                item = [n, m, o, str(p)]
+            # Change the fonts
+            # https://blog.csdn.net/gixome/article/details/120782015
+            Qw.QToolTip.setFont(Qg.QFont('Times New Roman', 15))
+            tooltip_palette = Qg.QPalette()
+            # Change the style
+            # https://stackoverflow.com/questions/34197295/how-to-change-the-background-color-of-qtooltip-of-a-qtablewidget-item
+            tooltip_palette.setColor(Qg.QPalette.ToolTipBase, Qg.QColor("white")) # "#F6F6F6"
+            tooltip_palette.setColor(Qg.QPalette.ToolTipText, Qg.QColor("black")) # #706F6F"
+            Qw.QToolTip.setPalette(tooltip_palette)
 
+            reflections = Qg.QStandardItem(item['reflections'])
+            reflections.setToolTip(item['reflections'])
+
+            file_size = ''
+            bytesize = 0
+            if item['size'] != '':
+                bytesize = int(item['size'])
+                file_size = self.readable_filesize(bytesize)
+            file_size = Qg.QStandardItem(file_size)
+            file_size._bytes = bytesize
+
+            date = str(datetime.fromtimestamp(item['date']))[:-3] # I remove the second area
+            date = Qg.QStandardItem(date)
+
+            item = [name, level, venue, year, tags, reflections, file_size, date]
             model_data.append(item)
 
-        self.model = AngryTableModel(model_data, self.setting_params)
-        self.model.sort_changed_signal.connect(
-            self.sorting_changed_received_signal, Qc.Qt.QueuedConnection)
+        # MOON, 2024-01-08
+        # construct AngryTableModel
+        # https://blog.csdn.net/A642960662/article/details/123093350
+        headers = ['Name', 'Level', 'Venue', 'Year', 'Tags', 'Reflections', 'Size', 'Date Modified']
+        self.model = AngryTableModel(len(model_data), len(headers))
+        self.model.setHorizontalHeaderLabels(headers)
+        for i in range(self.model.rowCount()):
+            for j in range(self.model.columnCount()):
+                self.model.setItem(i, j, model_data[i][j])
         self.center.table.setModel(self.model)
-        self.center.table.selectionModel().selectionChanged.connect(
-            self.selection_happens)
+        # End
 
-        total = locale.format('%d', len(db_query_result), grouping=True)
+        total = locale.format_string('%d', len(db_query_result), grouping=True)
         self.last_number_of_results = total
         self.status_bar.showMessage(total)
 
@@ -1159,6 +1188,7 @@ class AngryMainWindow(Qw.QMainWindow):
 
     def bold_text(self, line):
         return re.sub(self.regex_queries, '<b>\\1</b>', line)
+        #return re.sub(self.regex_queries, '<font color=blue>\\1</font>', line)
 
     # CREATES DICTIONARY WITH 6 MIME TYPES ICONS DEPENDING ON THEME
     def get_mime_icons(self):
@@ -1238,7 +1268,7 @@ class AngryMainWindow(Qw.QMainWindow):
 
         cur.execute("SELECT COALESCE(MAX(rowid), 0) FROM angry_table")
         total_rows_numb = cur.fetchone()[0]
-        total = locale.format('%d', total_rows_numb, grouping=True)
+        total = locale.format_string('%d', total_rows_numb, grouping=True)
         self.status_bar.showMessage(total)
 
     def key_press_Enter(self, QModelIndex, shift=False):
@@ -1255,11 +1285,79 @@ class AngryMainWindow(Qw.QMainWindow):
         qmodel_index = self.center.table.currentIndex()
         self.double_click_enter(qmodel_index, True, True)
 
-    def right_clk_copy(self):
+    def right_clk_copy_path(self):
         qmodel_index = self.center.table.currentIndex()
-        path = self.model.itemFromIndex(qmodel_index.row(), 0)._fullpath
+        content = self.model.itemFromIndex(self.model.index(qmodel_index.row(), 0))._fullpath
         clipboard = Qw.QApplication.clipboard()
-        clipboard.setText(path)
+        clipboard.setText(content)
+
+    def right_clk_copy(self, row, col):
+        # I don't know why the currentIndex().column() here always returns 0
+        # Thus, I use row and col to save the value of row and col, then use lambda to transfer the argument
+        # qmodel_index = self.center.table.currentIndex()
+        headertext = self.model.horizontalHeaderItem(col).text()
+        if headertext == 'Name':
+            content = self.model.itemFromIndex(self.model.index(row, col))._exact_name[:-4]
+        elif headertext == 'Tags':
+            content = self.model.itemFromIndex(self.model.index(row, col))._tags
+        else:
+            content = self.model.itemFromIndex(self.model.index(row, col)).text()
+        clipboard = Qw.QApplication.clipboard()
+        clipboard.setText(content)
+    
+    def right_clk_modify(self, row, col):
+        # MOON, 2023-12-31
+        # I don't know why the currentIndex().column() here always returns 0
+        # Thus, I use row and col to save the value of row and col, then use lambda to transfer the argument
+        # qmodel_index = self.center.table.currentIndex()
+        headertext = self.model.horizontalHeaderItem(col).text()
+        if headertext in ['Name', 'Size', 'Date Modified']:
+            return
+        else:
+            qmodel = self.model.itemFromIndex(self.model.index(row, col))
+            if self.model.horizontalHeaderItem(col).text() == 'Tags':
+                placeholder = qmodel._tags
+            else:
+                placeholder = qmodel.text()
+            if headertext == 'Reflections':
+                # https://python.hotexamples.com/examples/PyQt5.QtWidgets/QInputDialog/resize/python-qinputdialog-resize-method-examples.html
+                dlg = Qw.QInputDialog(self)
+                # dlg.setInputMode(Qw.QInputDialog.TextInput)
+                dlg.setOption(Qw.QInputDialog.InputDialogOption.UsePlainTextEditForTextInput)
+                dlg.setWindowTitle(headertext)
+                dlg.setLabelText(placeholder)
+                dlg.setTextValue(placeholder)
+                dlg.resize(1000, 600)
+                ok = dlg.exec_()
+                if ok:
+                    text = dlg.textValue()
+            else:
+                text, ok = Qw.QInputDialog.getText(self, headertext, '{}'.format(placeholder), text=placeholder)
+            if ok:
+                # MOON, 2023-12-31
+                # Update Text
+                qmodel.setText(str(text))                      
+                seq = {"path": 0, 'level': 1, 'venue': 2, 'year': 3, 'tags': 4, 'reflections': 5}
+                if headertext == "Tags" or headertext == "Reflections":
+                    qmodel.setToolTip(str(text))
+                path = self.model.itemFromIndex(self.model.index(row, seq['path']))._fullpath
+                fname = self.model.itemFromIndex(self.model.index(row, seq['path']))._name[:-4]
+                level = self.model.itemFromIndex(self.model.index(row, seq['level'])).text()
+                venue = self.model.itemFromIndex(self.model.index(row, seq['venue'])).text()
+                year = self.model.itemFromIndex(self.model.index(row, seq['year'])).text()
+                if headertext == "Tags":
+                    tags = str(text)
+                else:
+                    tags = self.model.itemFromIndex(self.model.index(row, seq['tags']))._tags
+                reflections = self.model.itemFromIndex(self.model.index(row, seq['reflections'])).text()
+                # Update angry_table
+                q = "UPDATE angry_table SET level = ?, venue = ?, year = ?, tags = ?, reflections = ? WHERE path = ?;"
+                params = (level, venue, year, tags, reflections, path)
+                run_update(q, params)
+                # Update metadata
+                q = "INSERT OR REPLACE INTO metadata (name, level, venue, year, tags, reflections) VALUES (?, ?, ?, ?, ?, ?);"
+                params = (fname, level, venue, year, tags, reflections)
+                run_update_metadata(q, params)
 
     # WHEN A ROW IS SELECTED IN TABLE VIEW, BY MOUSE OR KEYBOARD
     # MIMETYPE IS GET IN A THREAD TO KEEP THE INTERFACE RESPONSIVE
@@ -1292,10 +1390,8 @@ class AngryMainWindow(Qw.QMainWindow):
     def double_click_enter(self, QModelIndex, from_enter=False, shift=False):
         column = QModelIndex.column()
         row = QModelIndex.row()
-        if column == 0:
-            item = self.model.itemFromIndex(row, 0)
-        else:
-            item = self.model.itemFromIndex(row, 1)
+        # MOON, 2024-01-08
+        item = self.model.itemFromIndex(self.model.index(row, 0))
 
         path = item._fullpath
         parent_dir = item._parent_dir
@@ -1313,15 +1409,17 @@ class AngryMainWindow(Qw.QMainWindow):
 
         if not os.path.exists(path):
             self.status_bar.showMessage('NOT FOUND')
-            if platform.linux_distribution()[0].lower() == 'ubuntu':
-                self.center.table.setStyleSheet('selection-color:red;')
-            else:
-                self.center.table.setStyleSheet(
-                    'selection-background-color:red;')
+            # MOON 2024-01-08
+            # https://stackoverflow.com/questions/58758447/how-to-fix-module-platform-has-no-attribute-linux-distribution-when-instal
+            # Remove the following code
+            # if platform.linux_distribution()[0].lower() == 'ubuntu':
+            #     self.center.table.setStyleSheet('selection-color:red;')
+            # else:
+            self.center.table.setStyleSheet('selection-background-color:red;')
             self.center.table.timeout.start(150)
             return
         else:
-            self.center.table.setStyleSheet('selection-color:blue;')
+            self.center.table.setStyleSheet('selection-color:green;')
             self.center.table.timeout.start(150)
 
         fm = self.setting_params['file_manager']
@@ -1390,6 +1488,7 @@ class AngryMainWindow(Qw.QMainWindow):
     # USE OR DO NOT USE FTS EXTENSION TABLES IN THE DATABASE
     # FAST SEARCH OR SEARCH WITH SUBSTRINGS
     def checkbox_fts_click(self, state):
+        print('checkbox_fts_click')
         if state == Qc.Qt.Checked:
             self.setting_params['fts'] = True
             self.settings.setValue('fast_search_but_no_substring', True)
@@ -1588,6 +1687,8 @@ class UpdateDialogWindow(Qw.QDialog):
             self.excluded_dirs_btn.setText('none')
             self.excluded_dirs_btn.setStyleSheet('color:#888;font: italic;')
 
+        # MOON, 2023-12-31
+        # print(FTS5_AVAILABLE) # True
         if FTS5_AVAILABLE:
             self.label_2.setToolTip('FTS5 Available')
         else:
