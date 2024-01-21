@@ -51,6 +51,8 @@ DATABASE_PATH = join_path(os.path.expanduser('~'),
 
 # Modify the dataset path
 database_dir = '/home/moon/.cache/angrysearch/'
+# 2023-01-14
+database_dir2 = '/media/moon/data/study/notes/code/database/'
 
 def run_query(query, parameters=()):
     con = sqlite3.connect(database_dir + 'angry_database.db')
@@ -65,13 +67,13 @@ def run_update(query, parameters=()):
     con.close
 
 def run_update_metadata(query, parameters=()):
-    con = sqlite3.connect(database_dir + 'metadata.db')
+    con = sqlite3.connect(database_dir2 + 'metadata.db')
     con.execute(query, parameters)
     con.commit()
     con.close
 
 def run_query_metadata(query, parameters=()):
-    con = sqlite3.connect(database_dir + 'metadata.db')
+    con = sqlite3.connect(database_dir2 + 'metadata.db')
     query_result = con.execute(query, parameters)
     con.close
     return query_result
@@ -285,10 +287,10 @@ class ThreadDBUpdate(Qc.QThread):
             return False
         if ' ' not in paperfname or '_' in paperfname:
             return False
-        count_upper = sum(1 for char in paperfname if char.isupper())
-        # I think there is no paper who has only two upper characters, MOON 2024-01-08
-        if count_upper <= 2:
-            return False
+        # count_upper = sum(1 for char in paperfname if char.isupper())
+        # # I think there is no paper who has only two upper characters, MOON 2024-01-08
+        # if count_upper <= 2:
+        #     return False
         return paperfname[:-4]
 
     def crawling_drives(self):
@@ -296,7 +298,8 @@ class ThreadDBUpdate(Qc.QThread):
             print(err)
 
         # MOON, 2024-01-06, the folders used to save papers
-        root_dirs = [b'/media/moon/Data/study/papers/', b'/media/moon/Data/study/swift/', b'/media/moon/Data/study/share/papers/']
+        #root_dirs = [b'/media/moon/data/study/papers/', b'/media/moon/data/study/swift/', b'/media/moon/data/study/share/papers/']
+        root_dirs = [b'/media/moon/data/study/papers/', b'/media/moon/data/study/swift/']
         tstart = datetime.now()
 
         dir_list = []
@@ -1141,7 +1144,7 @@ class AngryMainWindow(Qw.QMainWindow):
 
             # Change the fonts
             # https://blog.csdn.net/gixome/article/details/120782015
-            Qw.QToolTip.setFont(Qg.QFont('Times New Roman', 15))
+            Qw.QToolTip.setFont(Qg.QFont('Times New Roman', 15)) # Times New Roman, Consolas
             tooltip_palette = Qg.QPalette()
             # Change the style
             # https://stackoverflow.com/questions/34197295/how-to-change-the-background-color-of-qtooltip-of-a-qtablewidget-item
@@ -1322,12 +1325,16 @@ class AngryMainWindow(Qw.QMainWindow):
             if headertext == 'Reflections':
                 # https://python.hotexamples.com/examples/PyQt5.QtWidgets/QInputDialog/resize/python-qinputdialog-resize-method-examples.html
                 dlg = Qw.QInputDialog(self)
+                dlg.setFont(Qg.QFont("Consolas", 12))
                 # dlg.setInputMode(Qw.QInputDialog.TextInput)
                 dlg.setOption(Qw.QInputDialog.InputDialogOption.UsePlainTextEditForTextInput)
+                dlg_textedit = dlg.findChild(Qw.QPlainTextEdit)
+                dlg_textedit.setLineWrapMode(Qw.QPlainTextEdit.WidgetWidth)
+
                 dlg.setWindowTitle(headertext)
-                dlg.setLabelText(placeholder)
+                dlg.setLabelText('- (motivation), + (contribution), ~ (reflection), > (cite), ? (issue), ...')
                 dlg.setTextValue(placeholder)
-                dlg.resize(1000, 600)
+                dlg.resize(1500, 900)
                 ok = dlg.exec_()
                 if ok:
                     text = dlg.textValue()
@@ -1336,7 +1343,7 @@ class AngryMainWindow(Qw.QMainWindow):
             if ok:
                 # MOON, 2023-12-31
                 # Update Text
-                qmodel.setText(str(text))                      
+                qmodel.setText(str(text))          
                 seq = {"path": 0, 'level': 1, 'venue': 2, 'year': 3, 'tags': 4, 'reflections': 5}
                 if headertext == "Tags" or headertext == "Reflections":
                     qmodel.setToolTip(str(text))
@@ -1350,6 +1357,9 @@ class AngryMainWindow(Qw.QMainWindow):
                 else:
                     tags = self.model.itemFromIndex(self.model.index(row, seq['tags']))._tags
                 reflections = self.model.itemFromIndex(self.model.index(row, seq['reflections'])).text()
+                # Update some properties
+                if headertext == "Tags":
+                    qmodel._tags = str(text)
                 # Update angry_table
                 q = "UPDATE angry_table SET level = ?, venue = ?, year = ?, tags = ?, reflections = ? WHERE path = ?;"
                 params = (level, venue, year, tags, reflections, path)
