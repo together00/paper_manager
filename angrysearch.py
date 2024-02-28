@@ -52,7 +52,7 @@ DATABASE_PATH = join_path(os.path.expanduser('~'),
 # Modify the dataset path
 database_dir = '/home/moon/.cache/angrysearch/'
 # 2023-01-14
-database_dir2 = '/media/moon/data/study/notes/code/database/'
+database_dir2 = '/home/moon/data/notes/code/database/'
 
 def run_query(query, parameters=()):
     con = sqlite3.connect(database_dir + 'angry_database.db')
@@ -298,8 +298,7 @@ class ThreadDBUpdate(Qc.QThread):
             print(err)
 
         # MOON, 2024-01-06, the folders used to save papers
-        #root_dirs = [b'/media/moon/data/study/papers/', b'/media/moon/data/study/swift/', b'/media/moon/data/study/share/papers/']
-        root_dirs = [b'/media/moon/data/study/papers/', b'/media/moon/data/study/swift/']
+        root_dirs = [b'/home/moon/data/papers/', b'/home/moon/data/swift/']
         tstart = datetime.now()
 
         dir_list = []

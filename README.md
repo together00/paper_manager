@@ -76,6 +76,9 @@ The main modifications are:
 
 + I add one `Qw.QComboBox()` (with Path, Venue and Tags items) for searching by different columns.
 
+## Bugs
++ 2024-01-18: The ``<'' can not be displayed well.
+
 ## References
 
 https://www.cnblogs.com/cloudhan/articles/17020139.html
