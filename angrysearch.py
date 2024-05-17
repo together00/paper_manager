@@ -298,7 +298,7 @@ class ThreadDBUpdate(Qc.QThread):
             print(err)
 
         # MOON, 2024-01-06, the folders used to save papers
-        root_dirs = [b'/home/moon/data/papers/', b'/home/moon/data/swift/']
+        root_dirs = [b'/home/moon/data/mine/', b'/home/moon/data/papers/']
         tstart = datetime.now()
 
         dir_list = []
@@ -526,6 +526,27 @@ class ThreadMimetype(Qc.QThread):
 
         self.mime_signal.emit(self.path, mimetype)
 
+def split_sentence(sentence, max_chars_per_line=100):
+    lines = sentence.split("\n")
+    result_lines = []
+
+    for line in lines:
+        words = line.split()
+        current_line = ""
+
+        for word in words:
+            if len(current_line) + len(word) + 1 <= max_chars_per_line:  # Add 1 for the space between words
+                current_line += word + " "
+            else:
+                result_lines.append(current_line.strip())
+                current_line = word + " "
+
+        # Add the remaining words to the last line
+        if current_line:
+            result_lines.append(current_line.strip())
+
+    return "\n".join(result_lines)
+
 class AngryTableModel(Qg.QStandardItemModel):
     r'''
     MOON, 2024-01-08
@@ -552,7 +573,7 @@ class AngryTableView(Qw.QTableView):
             self.setColumnWidth(1, int(width * 0.60))
         else:
             # MOON, You can modify the column width
-            width_col = [0.38, 0.03, 0.04, 0.03, 0.2, 0.2, 0.05, 0.07]
+            width_col = [0.38, 0.03, 0.04, 0.03, 0.18, 0.22, 0.05, 0.07]
             for i in range(7):
                 self.setColumnWidth(i, int(width * width_col[i]))
 
@@ -593,13 +614,16 @@ class AngryTableView(Qw.QTableView):
         act_open = right_click_menu.addAction('Open')
         act_open.triggered.connect(self.parent().parent().right_clk_open)
 
+        act_open_evince = right_click_menu.addAction('Open With Evince')
+        act_open_evince.triggered.connect(self.parent().parent().right_clk_open_evince)
+
         act_open_path = right_click_menu.addAction('Open Path')
         act_open_path.triggered.connect(self.parent().parent().right_clk_path)
 
-        act_open_path = right_click_menu.addAction('Copy Path')
-        act_open_path.triggered.connect(self.parent().parent().right_clk_copy_path)
-
         right_click_menu.addSeparator()
+
+        act_copy_path = right_click_menu.addAction('Copy Path')
+        act_copy_path.triggered.connect(self.parent().parent().right_clk_copy_path)
 
         # MOON, 2023-12-31
         # I don't know why the currentIndex().column() inside right_clk_modify() always returns 0
@@ -1152,7 +1176,7 @@ class AngryMainWindow(Qw.QMainWindow):
             Qw.QToolTip.setPalette(tooltip_palette)
 
             reflections = Qg.QStandardItem(item['reflections'])
-            reflections.setToolTip(item['reflections'])
+            reflections.setToolTip(split_sentence(item['reflections']))
 
             file_size = ''
             bytesize = 0
@@ -1287,6 +1311,35 @@ class AngryMainWindow(Qw.QMainWindow):
         qmodel_index = self.center.table.currentIndex()
         self.double_click_enter(qmodel_index, True, True)
 
+    def right_clk_open_evince(self):
+        '''
+        Since I find that evince is quite useful with the function of preview.
+        I decide to add open with eevince. (2024-05-17)
+        '''
+        qmodel_index = self.center.table.currentIndex()
+        column = qmodel_index.column()
+        row = qmodel_index.row()
+        item = self.model.itemFromIndex(self.model.index(row, 0))
+        path = item._fullpath
+
+        self.center.table.timeout = Qc.QTimer()
+        self.center.table.timeout.setSingleShot(True)
+        self.center.table.timeout.timeout.connect(self.row_color_back)
+
+        if not os.path.exists(path):
+            self.status_bar.showMessage('NOT FOUND')
+            self.center.table.setStyleSheet('selection-background-color:red;')
+            self.center.table.timeout.start(150)
+            return
+        else:
+            self.center.table.setStyleSheet('selection-color:green;')
+            self.center.table.timeout.start(150)
+
+        subprocess.Popen(['evince', path])
+
+        if self.setting_params['close_on_execute']:
+            self.close()
+
     def right_clk_copy_path(self):
         qmodel_index = self.center.table.currentIndex()
         content = self.model.itemFromIndex(self.model.index(qmodel_index.row(), 0))._fullpath
@@ -1344,8 +1397,10 @@ class AngryMainWindow(Qw.QMainWindow):
                 # Update Text
                 qmodel.setText(str(text))          
                 seq = {"path": 0, 'level': 1, 'venue': 2, 'year': 3, 'tags': 4, 'reflections': 5}
-                if headertext == "Tags" or headertext == "Reflections":
+                if headertext == "Tags":
                     qmodel.setToolTip(str(text))
+                elif headertext == "Reflections":
+                    qmodel.setToolTip(split_sentence(str(text)))
                 path = self.model.itemFromIndex(self.model.index(row, seq['path']))._fullpath
                 fname = self.model.itemFromIndex(self.model.index(row, seq['path']))._name[:-4]
                 level = self.model.itemFromIndex(self.model.index(row, seq['level'])).text()
