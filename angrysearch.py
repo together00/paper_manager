@@ -622,9 +622,6 @@ class AngryTableView(Qw.QTableView):
 
         right_click_menu.addSeparator()
 
-        act_copy_path = right_click_menu.addAction('Copy Path')
-        act_copy_path.triggered.connect(self.parent().parent().right_clk_copy_path)
-
         # MOON, 2023-12-31
         # I don't know why the currentIndex().column() inside right_clk_modify() always returns 0
         # Thus, I use row and col to save the value of row and col, then use lambda to transfer the argument
@@ -632,6 +629,9 @@ class AngryTableView(Qw.QTableView):
         col = self.currentIndex().column()
         act_copy = right_click_menu.addAction('Copy')
         act_copy.triggered.connect(lambda: self.parent().parent().right_clk_copy(row, col))
+
+        act_copy_path = right_click_menu.addAction('Copy Path')
+        act_copy_path.triggered.connect(self.parent().parent().right_clk_copy_path)
 
         act_modify = right_click_menu.addAction('Modify')
         act_modify.triggered.connect(lambda: self.parent().parent().right_clk_modify(row, col))
@@ -1191,6 +1191,9 @@ class AngryMainWindow(Qw.QMainWindow):
 
             item = [name, level, venue, year, tags, reflections, file_size, date]
             model_data.append(item)
+            
+            # Sort `model_data` according to `date`.
+            model_data = sorted(model_data, key=lambda x: x[-1], reverse=True)
 
         # MOON, 2024-01-08
         # construct AngryTableModel
