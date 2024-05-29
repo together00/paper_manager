@@ -1295,10 +1295,14 @@ class AngryMainWindow(Qw.QMainWindow):
 
         self.process_q_resuls('', tuppled_500)
 
-        cur.execute("SELECT COALESCE(MAX(rowid), 0) FROM angry_table")
-        total_rows_numb = cur.fetchone()[0]
-        total = locale.format_string('%d', total_rows_numb, grouping=True)
-        self.status_bar.showMessage(total)
+        # Improve the status messages 
+        #cur.execute("SELECT COALESCE(MAX(rowid), 0) FROM angry_table")
+        cur.execute("SELECT COUNT(*) FROM angry_table")
+        num_total_rows = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM angry_table WHERE level != ''")
+        num_mine_rows = cur.fetchone()[0]
+        
+        self.status_bar.showMessage('  {} / {}  '.format(num_mine_rows, num_total_rows))
 
     def key_press_Enter(self, QModelIndex, shift=False):
         if shift:
