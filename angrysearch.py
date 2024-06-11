@@ -1155,6 +1155,9 @@ class AngryMainWindow(Qw.QMainWindow):
 
             # MOON, 2023-12-30
             level = Qg.QStandardItem(item['level'])
+            # To highlight the files in the folder 'mine' (2025-06-11)
+            if 'mine' in name._fullpath:
+                level.setBackground(Qg.QColor(30, 220, 50, 128))
 
             #venue = Qg.QStandardItem('<kbd style="background-color: lightgrey">{}</kbd>'.format(item['venue']))
             venue = Qg.QStandardItem(item['venue'])
@@ -1192,8 +1195,20 @@ class AngryMainWindow(Qw.QMainWindow):
             item = [name, level, venue, year, tags, reflections, file_size, date]
             model_data.append(item)
             
-            # Sort `model_data` according to `date`.
+            # Note: Sort the items
+            # Sort `model_data` according to `date` and `folders`
+            # Note Date: 2024-06-11
+            # model_data1, model_data2 = [], []
+            # for i in model_data:
+            #     if 'mine' in i[0]._fullpath:
+            #         model_data1.append(i)
+            #     else:
+            #         model_data2.append(i)
+            # model_data1 = sorted(model_data1, key=lambda x: x[-1], reverse=True)
+            # model_data2 = sorted(model_data2, key=lambda x: x[-1], reverse=True)
+            # model_data = model_data1 + model_data2
             model_data = sorted(model_data, key=lambda x: x[-1], reverse=True)
+            
 
         # MOON, 2024-01-08
         # construct AngryTableModel
@@ -1299,10 +1314,10 @@ class AngryMainWindow(Qw.QMainWindow):
         #cur.execute("SELECT COALESCE(MAX(rowid), 0) FROM angry_table")
         cur.execute("SELECT COUNT(*) FROM angry_table")
         num_total_rows = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM angry_table WHERE level != ''")
+        cur.execute("SELECT COUNT(*) FROM angry_table WHERE level GLOB '[0-9]*'")
         num_mine_rows = cur.fetchone()[0]
         
-        self.status_bar.showMessage('  {} / {}  '.format(num_mine_rows, num_total_rows))
+        self.status_bar.showMessage('{} / {}  '.format(num_mine_rows, num_total_rows))
 
     def key_press_Enter(self, QModelIndex, shift=False):
         if shift:

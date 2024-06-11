@@ -4,12 +4,18 @@
 
 A paper manager built on [ANGRYsearch](https://github.com/DoTheEvo/ANGRYsearch).
 
-**Motivations:** 
+### Motivations:
 
 + *Manage papers efficiently.* I used to categorize papers in different folders and search them by [FSearch](https://github.com/cboxdoerfer/fsearch). However, as the papers increases, I cannot deal with them efficiently, especially for the unfamiliar papers. By the way, there are many popular paper managers in the market, e.g., zotero.
 + *Customize.* Even though I like FSearch, I find that it is written in C. Since my research interests are AI, Python is more user-friendly for me. That is why I choose [ANGRYsearch](https://github.com/DoTheEvo/ANGRYsearch).
 
-## Features
+### My Style
+
++ In the Column "level", we use `-` to denote the paper that I think it is not "good" enough.
+
+
+
+# Features
 
 The overview of this paper manager
 
@@ -20,7 +26,7 @@ The columns are name, level, venue, year, tags, reflections, size, and date modi
 + Level: You can adjust it according to your proficiency level of a paper.
 + Reflections: You can add some reflections of a paper to remind your of the digest of this paper.
 
-## How to use?
+# How to use?
 
 The main file is `angrysearch.py`. All the modifications are made on it.
 
@@ -53,7 +59,7 @@ In fact, this paper manager is a file searching software indeed. So some require
 
 + Run the python file with `python angrysearch.py`.
 
-## Modifications on ANGRYsearch
+# Modifications on ANGRYsearch
 
 The core functionality is from ANGRYsearch.
 
@@ -76,10 +82,10 @@ The main modifications are:
 
 + I add one `Qw.QComboBox()` (with Path, Venue and Tags items) for searching by different columns.
 
-## Bugs
+# Bugs
 + 2024-01-18: The ``<'' can not be displayed well.
 
-## References
+# References
 
 https://www.cnblogs.com/cloudhan/articles/17020139.html
 
